@@ -10,13 +10,18 @@ intact, and resumable. `data-exists ≠ resume-reachable`.
 ## What it does
 
 ```
-bring.sh preflight <host>              landing-zone facts; exits 3 if ghq roots differ
-bring.sh list      <host>              every local worktree space + what <host> already holds
-bring.sh check     <host> <slug>...    git state, sessions, agent idle?, rsync DRY-RUN
-bring.sh ferry     <host> <slug>...    push branch, rsync, worktree add, direnv allow, herdr open
-bring.sh verify    <host> <slug>...    the 4 locks + HEAD match + space id
-bring.sh ledger    <host> <slug>...    a ledger, measured live
+bun bring.ts preflight <host>              landing-zone facts; exits 3 if ghq roots differ
+bun bring.ts list      <host>              every local worktree space + what <host> already holds
+bun bring.ts check     <host> <slug>...    git state, sessions, agent idle?, rsync DRY-RUN
+bun bring.ts ferry     <host> <slug>...    push branch, rsync, worktree add, direnv allow, herdr open
+bun bring.ts verify    <host> <slug>...    the 4 locks + HEAD match + space id
+bun bring.ts ledger    <host> <slug>...    a ledger, measured live
 ```
+
+TypeScript on [Bun](https://bun.sh), using `Bun.$` for every shell call. `bring.sh` is the
+superseded shell original, kept beside it for reference. Each subcommand opens ONE ssh
+connection covering all slugs: 8 calls as 8 ssh invocations measured 1.305s, the same 8
+inside one ssh measured 0.174s.
 
 `SKILL.md` beside it is the agent-facing half: it tells Claude Code to run those
 subcommands in order, show the human what each measured, and stop for a decision before
@@ -50,12 +55,21 @@ dependency on the skill wrapper.
 
 Every one of these cost a real debugging session; they are written up in `SKILL.md`.
 
-- **`herdr workspace create --cwd <repo>` does not bind the repo.** The space carries no
-  worktree metadata, so a parent lookup by `repo_key` misses it and children opened under it
-  never nest. The first `worktree open --trust-repository` binds it. Left unfixed, one loop
-  produced three parents for one repo and zero nested children.
-- **`workspace create` returns `.result.workspace.workspace_id`.** The obvious
-  `.result.workspace_id` is `null`, which flows into `--workspace null` and fails silently.
+- **Scope worktree calls with `--cwd <repo>`, and the parent problem disappears.** herdr
+  resolves the repo's parent workspace itself, creating and binding it as needed. Omitting
+  `--cwd` falls back to the *active* workspace, which errors `linked_worktree_source` whenever
+  that happens to be a worktree. Managing the parent by hand instead (`workspace create`, then
+  a lookup by `repo_key`) produces one duplicate parent per child and zero nesting, because a
+  space made by `workspace create --cwd` carries no worktree metadata at all until a
+  `--trust-repository` open binds it. None of that code needs to exist.
+- **ssh does not preserve argv.** It joins its command arguments with spaces and hands one
+  string to the far shell, which re-splits it. `ssh host bash -lc "$script"` therefore runs
+  only the script's first word under `-c`. Quote the whole remote command into one word.
+- **Each herdr session has its own socket.** `herdr workspace list` sees only the one it is
+  pointed at; on one machine here the default socket held 37 of 44 workspaces. Read the
+  default plus every `sessions/*/herdr.sock`.
+- **One cwd can hold several panes.** If any pane there is mid-write the directory is unsafe
+  to copy, so the busiest status has to win over the first one found.
 - **Sidebar labels are not directory names.** Reproducing a layout means carrying labels.
 - **`--ignore-existing` never repairs.** A transcript copied mid-write stays truncated forever,
   because the next run sees the file and skips it. So a `working` pane's session copy is

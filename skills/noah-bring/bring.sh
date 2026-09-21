@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SUPERSEDED by bring.ts (Bun) — kept for reference, not maintained. See SKILL.md.
 # noah-bring — carry herdr worktree spaces + their Claude sessions to another host, and prove it.
 # Deterministic subcommands so an agent never has to reconstruct the crossing by hand.
 #

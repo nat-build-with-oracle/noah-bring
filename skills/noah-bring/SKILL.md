@@ -8,19 +8,23 @@ description: "Carry herdr worktree spaces and their Claude sessions from this ma
 > A ferry is not a copy. A copy moves bytes; a ferry **verifies the crossing** — that the
 > session is reachable, intact and resumable on the far shore. `data-exists ≠ resume-reachable`.
 
-Everything mechanical lives in `bring.sh` beside this file. The agent's job is to run the
+Everything mechanical lives in `bring.ts` beside this file (Bun, run it with `bun`).
+`bring.sh` is the superseded shell original, kept for reference; do not edit it. The agent's job is to run the
 subcommands **in order**, show the human what each one measured, and **ask before the two
 irreversible-ish steps** (pushing branches, writing to the far host). Never reconstruct a step
 by hand when a subcommand exists for it.
 
 ```
-SCRIPT=~/.claude/skills/noah-bring/bring.sh
+SCRIPT="bun ~/.claude/skills/noah-bring/bring.ts"
 $SCRIPT preflight <host>              landing-zone facts; exits 3 if ghq roots differ
 $SCRIPT list      <host>              every local worktree space + what <host> already holds
 $SCRIPT check     <host> <slug>...    git state, sessions, agent idle?, rsync DRY-RUN
 $SCRIPT ferry     <host> <slug>...    push branch, rsync (merge-safe), worktree add, direnv allow, herdr open
 $SCRIPT verify    <host> <slug>...    locks 1–3 + HEAD match + space id
 $SCRIPT ledger    <host> <slug>...    ledger markdown — table, locks, dirty list, all live
+
+Every subcommand opens ONE ssh connection covering all slugs. Measured on this pair: 8 calls
+as 8 ssh invocations took 1.305s, the same 8 inside one ssh took 0.174s.
 ```
 
 `<host>` is `user@hostname` exactly as ssh takes it. `<slug>` is a **herdr workspace label**
@@ -154,7 +158,7 @@ One table: `ask → label → far space id → files/bytes → locks 4/4`. Then,
   "already there". That is why the script defers rather than risks it.
 - **Never ferry `.envrc`** or any dirty file by hand. Show it; the human recreates it.
 - **Never guess a slug from a nickname.** `list` is the resolver. The first attempt at this
-  task guessed repo names from nicknames — all wrong; every target was
+  task guessed `haos-oracle`, `omx-grokbot`, `oracle-skills-cli` — all wrong; every target was
   a worktree of one repo, not separate repos.
 - **Never `sleep`-poll** waiting on a pane. Use `herdr events.wait`, or hand the wait to a
   herdr pane (`/herdr-pane-run`).
@@ -162,8 +166,20 @@ One table: `ask → label → far space id → files/bytes → locks 4/4`. Then,
 ## Traps this skill already routes around (so you recognise them if they surface)
 
 - Far host's `herdr`, `claude`, `maw` live in `~/.local/bin` — invisible to a non-login
-  `ssh host cmd`. Every remote call in `bring.sh` goes through `bash -lc`. Its `~/.profile`
-  prints `go: command not found`; the script filters that line.
+  `ssh host cmd`. Every remote call goes through `bash -lc`. A far-side `~/.profile` that
+  prints noise on login is filtered out.
+- **ssh does not preserve argv.** It joins its command arguments with spaces and hands ONE
+  string to the far shell, which re-splits it. So `ssh host bash -lc "$script"` runs only
+  the script's FIRST WORD under `-c`; the rest executes in the outer login shell with the
+  second word as `$0`. The whole remote command has to be quoted into one word before it is
+  handed to ssh. Passing the script as its own argv entry looks right and is not.
+- **One cwd can hold several panes.** Ours holds a claude and a codex. If any pane there is
+  `working` or `blocked` the project dir is unsafe to copy, so the busiest status decides —
+  taking the first match can report `idle` for a directory another pane is appending to.
+- **Each herdr SESSION has its own server and socket**, and `herdr workspace list` only sees
+  the one it is pointed at. Measured: the default socket held 37 workspaces on a machine
+  with 44. The resolver reads the default socket plus every `sessions/*/herdr.sock`, and
+  skips the ones whose server is gone.
 - `herdr worktree open --path X` fails with `linked_worktree_source` unless `--workspace`
   names the repo's **parent** space. The script finds it by `worktree.repo_key == <repo>/.git`,
   then by label, then creates it.
@@ -190,4 +206,4 @@ Built 2026-09-22 from the first crossing: 5 worktrees by hand, then 1 driven by 
 (the first real test of it), then a full layout — 21 worktrees and 16 repo-level spaces — which
 is where the parent-binding trap above surfaced and was fixed. Strategy is noah's (`/noah`,
 `/oracle-ferry`); ledger discipline is `/ferry-ledger`'s. The `maw noah` CLI this was meant to
-become does not exist yet — `bring.sh` is its working prototype.
+become does not exist yet — `bring.ts` is its working prototype.
