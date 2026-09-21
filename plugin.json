@@ -1,0 +1,19 @@
+{
+  "name": "noah",
+  "version": "0.1.0",
+  "entry": "./src/index.ts",
+  "sdk": "^1.0.0",
+  "description": "Ferry or hand off herdr worktree spaces and their Claude Code sessions between machines, and prove the crossing.",
+  "author": "build-with-oracle",
+  "cli": {
+    "command": "noah",
+    "aliases": ["ferry"],
+    "help": "maw noah — preflight · list · check · ferry (copy) · send / recall (move, one machine at a time) · owner · verify · ledger"
+  },
+  "capabilities": ["fs:read", "fs:write", "net"],
+  "weight": 50,
+  "runtime": "bun-dev",
+  "target": "js",
+  "license": "MIT",
+  "schemaVersion": 1
+}

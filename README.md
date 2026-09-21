@@ -18,6 +18,9 @@ bun bring.ts verify    <host> <slug>...    the 4 locks + HEAD match + space id
 bun bring.ts ledger    <host> <slug>...    a ledger, measured live
 ```
 
+Installed as a **maw plugin**, so the above is also `maw noah preflight <host>` and so on.
+Symlink the checkout into `~/.maw/plugins/noah` and edits are live with no install step.
+
 TypeScript on [Bun](https://bun.sh), using `Bun.$` for every shell call. `bring.sh` is the
 superseded shell original, kept beside it for reference. Each subcommand opens ONE ssh
 connection covering all slugs: 8 calls as 8 ssh invocations measured 1.305s, the same 8
@@ -26,6 +29,26 @@ inside one ssh measured 0.174s.
 `SKILL.md` beside it is the agent-facing half: it tells Claude Code to run those
 subcommands in order, show the human what each measured, and stop for a decision before
 pushing branches or writing to the far host.
+
+## Ferry copies. Handoff moves.
+
+`ferry` leaves the worktree open on both machines. That is right for carrying history, and
+wrong for carrying WORK: two machines holding one branch with an agent on each other's stale
+code is the failure mode.
+
+```
+bun src/index.ts send   <host> <slug>...   commit, push, carry sessions, open there, close HERE
+bun src/index.ts recall <host> <slug>...   commit+push there, pull here, open here, close THERE
+bun src/index.ts owner  <host> <slug>...   who holds it now, plus the handoff history
+```
+
+Ownership is an **append-only git tag**, `noah-owner/<slug>/<stamp>-<host>`, never a moved
+ref. Newest tag wins, nothing is force-pushed, and the full trail of who held it survives.
+`owner` reports `OPEN ON BOTH` when the invariant is broken.
+
+`send` refuses to act while an agent is mid-turn, refuses `main`, and closes the local space
+**last** — only after the far side is proven open. The checkout stays on disk, so the branch
+and the work remain recoverable; only the herdr space moves.
 
 ## The 4 locks
 

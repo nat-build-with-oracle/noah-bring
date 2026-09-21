@@ -8,20 +8,34 @@ description: "Carry herdr worktree spaces and their Claude sessions from this ma
 > A ferry is not a copy. A copy moves bytes; a ferry **verifies the crossing** — that the
 > session is reachable, intact and resumable on the far shore. `data-exists ≠ resume-reachable`.
 
-Everything mechanical lives in `bring.ts` beside this file (Bun, run it with `bun`).
+Everything mechanical is a **maw plugin**: `maw noah`. The source is `src/index.ts` in this
+repo, symlinked into `~/.maw/plugins/noah`, so edits are live with no install step.
 `bring.sh` is the superseded shell original, kept for reference; do not edit it. The agent's job is to run the
 subcommands **in order**, show the human what each one measured, and **ask before the two
 irreversible-ish steps** (pushing branches, writing to the far host). Never reconstruct a step
 by hand when a subcommand exists for it.
 
 ```
-SCRIPT="bun ~/.claude/skills/noah-bring/bring.ts"
+SCRIPT="maw noah"
 $SCRIPT preflight <host>              landing-zone facts; exits 3 if ghq roots differ
 $SCRIPT list      <host>              every local worktree space + what <host> already holds
 $SCRIPT check     <host> <slug>...    git state, sessions, agent idle?, rsync DRY-RUN
 $SCRIPT ferry     <host> <slug>...    push branch, rsync (merge-safe), worktree add, direnv allow, herdr open
 $SCRIPT verify    <host> <slug>...    locks 1–3 + HEAD match + space id
 $SCRIPT ledger    <host> <slug>...    ledger markdown — table, locks, dirty list, all live
+
+A **ferry is a COPY** — both machines keep the space. A **handoff is a MOVE**:
+
+```
+$SCRIPT send      <host> <slug>...    commit, push, carry sessions, open there, close HERE
+$SCRIPT recall    <host> <slug>...    commit+push there, pull here, open here, close THERE
+$SCRIPT owner     <host> <slug>...    who holds it now, plus the handoff history
+```
+
+Use `send`/`recall` when the work should exist in ONE place — two machines holding one branch
+with an agent on each is the failure these prevent. Ownership is an append-only git tag
+(`noah-owner/<slug>/<stamp>-<host>`), never a moved ref, so the trail of who held it survives
+and no force-push is ever needed. `owner` says `OPEN ON BOTH` when the invariant is broken.
 
 Every subcommand opens ONE ssh connection covering all slugs. Measured on this pair: 8 calls
 as 8 ssh invocations took 1.305s, the same 8 inside one ssh took 0.174s.
