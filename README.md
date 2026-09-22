@@ -39,8 +39,14 @@ code is the failure mode.
 ```
 bun src/index.ts send   <host> <slug>...   commit, push, carry sessions, open there, close HERE
 bun src/index.ts recall <host> <slug>...   commit+push there, pull here, open here, close THERE
+bun src/index.ts toggle <host> <slug>...   flip sides — open here goes there, open there comes back
 bun src/index.ts owner  <host> <slug>...   who holds it now, plus the handoff history
 ```
+
+`toggle` is the one-verb form: a worktree belongs to exactly one side, so the useful control
+is a flip rather than two commands the caller has to choose between. It refuses when a slug is
+open on both, because there is no safe automatic answer to which copy is real — that state is
+what a plain `ferry` leaves behind, and `send` or `recall` resolves it explicitly.
 
 Ownership is an **append-only git tag**, `noah-owner/<slug>/<stamp>-<host>`, never a moved
 ref. Newest tag wins, nothing is force-pushed, and the full trail of who held it survives.

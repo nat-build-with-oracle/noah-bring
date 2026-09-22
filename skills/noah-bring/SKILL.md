@@ -29,6 +29,7 @@ A **ferry is a COPY** — both machines keep the space. A **handoff is a MOVE**:
 ```
 $SCRIPT send      <host> <slug>...    commit, push, carry sessions, open there, close HERE
 $SCRIPT recall    <host> <slug>...    commit+push there, pull here, open here, close THERE
+$SCRIPT toggle    <host> <slug>...    flip it to the other side — here goes there, there comes back
 $SCRIPT owner     <host> <slug>...    who holds it now, plus the handoff history
 ```
 
