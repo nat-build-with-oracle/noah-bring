@@ -8,9 +8,13 @@ description: "Carry herdr worktree spaces and their Claude sessions from this ma
 > A ferry is not a copy. A copy moves bytes; a ferry **verifies the crossing** — that the
 > session is reachable, intact and resumable on the far shore. `data-exists ≠ resume-reachable`.
 
-Everything mechanical is a **maw plugin**: `maw noah`. The source is `src/index.ts` in this
-repo, symlinked into `~/.maw/plugins/noah`, so edits are live with no install step.
-`bring.sh` is the superseded shell original, kept for reference; do not edit it. The agent's job is to run the
+Everything mechanical is a **maw plugin**: `maw noah`. There is exactly ONE source file,
+`src/index.ts` in the noah-bring repo, symlinked into `~/.maw/plugins/noah` so edits are live
+with no install step. This skill deliberately does NOT carry a copy of it — a second copy is a
+second thing to fix, and the two drift the first time only one is edited.
+
+If `maw noah` is not on PATH, run the same file directly: `bun <repo>/src/index.ts <cmd> …`.
+`bring.sh` is the superseded shell original, kept in the repo for reference; do not edit it. The agent's job is to run the
 subcommands **in order**, show the human what each one measured, and **ask before the two
 irreversible-ish steps** (pushing branches, writing to the far host). Never reconstruct a step
 by hand when a subcommand exists for it.

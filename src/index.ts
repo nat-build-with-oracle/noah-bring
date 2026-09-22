@@ -32,7 +32,7 @@ $.nothrow();
  * one emitter is what keeps the two paths honest — the `today` plugin notes the same thing,
  * having been bitten by a freeze that only appeared on the direct-run path.
  */
-let out: (line: string) => void = (line) => out(line);
+let out: (line: string) => void = (line) => console.log(line);
 
 // ── types ────────────────────────────────────────────────────────────────────────────
 type Workspace = {
@@ -526,6 +526,14 @@ async function commitTracked(t: Target, why: string): Promise<boolean> {
   return c.exitCode === 0;
 }
 
+/** The far host's workspace id for a checkout, or "closed". One jq, one place. */
+async function farSpaceId(wt: string): Promise<string> {
+  const id = await remote(
+    `herdr workspace list | jq -r --arg p ${q(wt)} '[.result.workspaces[] | select(.worktree.checkout_path==$p) | .workspace_id][0] // "closed"'`,
+  );
+  return id.trim() || "closed";
+}
+
 async function localSpaceOf(wt: string): Promise<Workspace | undefined> {
   return (await workspaces()).find((w) => w.worktree?.checkout_path === wt);
 }
@@ -562,7 +570,9 @@ async function send(slugs: string[]) {
 ( [ -d ${q(t.repo)}/.git ] || ghq get ${q(t.orgRepo)} >/dev/null 2>&1
   [ -d ${q(t.repo)}/.git ] || { echo '  !! repo absent on far side'; exit 0; }
   git -C ${q(t.repo)} fetch origin --quiet 2>/dev/null
-  if [ -d ${q(t.wt)} ]; then git -C ${q(t.wt)} pull --ff-only --quiet 2>/dev/null; printf '  far-wt    updated: '; git -C ${q(t.wt)} rev-parse --short=8 HEAD
+  if [ -d ${q(t.wt)} ]; then
+    if git -C ${q(t.wt)} pull --ff-only --quiet 2>/dev/null; then printf '  far-wt    updated: '; git -C ${q(t.wt)} rev-parse --short=8 HEAD
+    else echo '  !! far-wt fast-forward pull FAILED — far checkout is stale, not handing off'; exit 0; fi
   else printf '  far-wt    '; git -C ${q(t.repo)} worktree add ${q(t.wt)} ${q(t.branch)} 2>&1 | tail -1; fi
   [ -f ${q(t.wt)}/.envrc ] && command -v direnv >/dev/null && direnv allow ${q(t.wt)} 2>/dev/null
   printf '  far-space '
@@ -647,10 +657,7 @@ async function toggle(slugs: string[]) {
     const t = await resolveAndRemember(slug);
     if (!t) continue;
     const here = !!(await localSpaceOf(t.wt));
-    const there =
-      (await remote(
-        `herdr workspace list | jq -r --arg p ${q(t.wt)} '[.result.workspaces[] | select(.worktree.checkout_path==$p) | .workspace_id][0] // "closed"'`,
-      )).trim() !== "closed";
+    const there = (await farSpaceId(t.wt)) !== "closed";
 
     if (here && there) {
       out(`--- ${t.slug} ---`);
@@ -672,11 +679,9 @@ async function owner(slugs: string[]) {
     out(`  owner     ${await ownerOf(t)}`);
     const here = await localSpaceOf(t.wt);
     out(`  space here ${here ? here.workspace_id : "closed"}`);
-    const there = await remote(
-      `herdr workspace list | jq -r --arg p ${q(t.wt)} '[.result.workspaces[] | select(.worktree.checkout_path==$p) | .workspace_id][0] // "closed"'`,
-    );
-    out(`  space ${HOST} ${there.trim()}`);
-    if (here && there.trim() !== "closed") out("  !! OPEN ON BOTH — that is the state handoffs exist to prevent.");
+    const there = await farSpaceId(t.wt);
+    out(`  space ${HOST} ${there}`);
+    if (here && there !== "closed") out("  !! OPEN ON BOTH — that is the state handoffs exist to prevent.");
     for (const tag of tags.slice(-4)) out(`  history   ${tag}`);
   }
 }
