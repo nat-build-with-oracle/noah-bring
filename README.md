@@ -43,6 +43,9 @@ bun src/index.ts toggle <host> <slug>...   flip sides — open here goes there, 
 bun src/index.ts owner  <host> <slug>...   who holds it now, plus the handoff history
 ```
 
+Exit code carries the invariant: any run that ends with a worktree open on both machines, or
+on neither, exits non-zero. A close that fails is reported as a failure, not a note.
+
 `toggle` is the one-verb form: a worktree belongs to exactly one side, so the useful control
 is a flip rather than two commands the caller has to choose between. It refuses when a slug is
 open on both, because there is no safe automatic answer to which copy is real — that state is
@@ -96,7 +99,9 @@ Every one of these cost a real debugging session; they are written up in `SKILL.
   only the script's first word under `-c`. Quote the whole remote command into one word.
 - **Each herdr session has its own socket.** `herdr workspace list` sees only the one it is
   pointed at; on one machine here the default socket held 37 of 44 workspaces. Read the
-  default plus every `sessions/*/herdr.sock`.
+  default plus every `sessions/*/herdr.sock` — **on both sides**. Applying this locally and
+  forgetting the remote is its own bug: a far workspace in a named session reads as "closed",
+  so the close that should follow never happens and the worktree stays open on both.
 - **One cwd can hold several panes.** If any pane there is mid-write the directory is unsafe
   to copy, so the busiest status has to win over the first one found.
 - **Sidebar labels are not directory names.** Reproducing a layout means carrying labels.

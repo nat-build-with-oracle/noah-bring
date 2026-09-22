@@ -526,12 +526,23 @@ async function commitTracked(t: Target, why: string): Promise<boolean> {
   return c.exitCode === 0;
 }
 
-/** The far host's workspace id for a checkout, or "closed". One jq, one place. */
+/**
+ * Shell that walks EVERY herdr server on the far host — the default socket plus each named
+ * session — and prints `<socket>\t<workspace_id>` for a checkout. Asking only the default
+ * socket is how a workspace in a named session gets misread as closed.
+ */
+const farSpaceLookup = (wt: string) => `
+for s in ~/.config/herdr/herdr.sock ~/.config/herdr/sessions/*/herdr.sock; do
+  [ -S "$s" ] || continue
+  id=$(HERDR_SOCKET_PATH="$s" herdr workspace list 2>/dev/null \
+    | jq -r --arg p ${q(wt)} '[.result.workspaces[]? | select(.worktree.checkout_path==$p) | .workspace_id][0] // empty' 2>/dev/null)
+  [ -n "$id" ] && { printf '%s\\t%s\\n' "$s" "$id"; break; }
+done`;
+
+/** The far host's workspace id for a checkout, or "closed" — across all its session servers. */
 async function farSpaceId(wt: string): Promise<string> {
-  const id = await remote(
-    `herdr workspace list | jq -r --arg p ${q(wt)} '[.result.workspaces[] | select(.worktree.checkout_path==$p) | .workspace_id][0] // "closed"'`,
-  );
-  return id.trim() || "closed";
+  const row = (await remote(farSpaceLookup(wt))).trim();
+  return row ? row.split("\t")[1] : "closed";
 }
 
 async function localSpaceOf(wt: string): Promise<Workspace | undefined> {
@@ -539,6 +550,9 @@ async function localSpaceOf(wt: string): Promise<Workspace | undefined> {
 }
 
 /** here → <host>. Push the work, carry the sessions, open there, then close HERE. */
+/** Set by any path that breaks the one-machine invariant, so the exit code can report it. */
+let failed = false;
+
 async function send(slugs: string[]) {
   for (const t of await resolveAll(slugs)) {
     out(`--- ${t.slug} → ${HOST} ---`);
@@ -581,6 +595,7 @@ async function send(slugs: string[]) {
     out(far);
     if (far.includes("ERROR") || far.includes("!!")) {
       out("  !! far side did not open — keeping the space HERE. Nothing was closed.");
+      failed = true;
       continue;
     }
 
@@ -595,7 +610,13 @@ async function send(slugs: string[]) {
     else {
       const c = await herdrOn(ws.sock, ["workspace", "close", ws.workspace_id]);
       const body = c.stdout.toString();
-      out(`  here      ${body.includes("error") ? "close refused: " + body.trim().slice(0, 90) : `closed ${ws.workspace_id}`}`);
+      if (body.includes("error") || c.exitCode !== 0) {
+        // Open there AND still open here is the one state this command exists to prevent,
+        // so it is a failure, not a note. Say so loudly and fail the run.
+        out(`  !! here    close FAILED (${body.trim().slice(0, 90)})`);
+        out(`  !! ${t.slug} is now OPEN ON BOTH — close it here, or run recall ${HOST} ${t.slug}`);
+        failed = true;
+      } else out(`  here      closed ${ws.workspace_id}`);
     }
   }
 }
@@ -613,7 +634,10 @@ async function recall(slugs: string[]) {
   else git -C ${q(t.wt)} commit -q -m 'wip(handoff): back from the far machine' 2>/dev/null && echo '  far-commit committed'; fi
   printf '  far-push  '; git -C ${q(t.wt)} push origin ${q(t.branch)} 2>&1 | tail -1 )`);
     out(far);
-    if (far.includes("!!")) continue;
+    if (far.includes("!!")) {
+      failed = true;
+      continue;
+    }
 
     // Sessions come BACK, same merge-safe rule in the other direction.
     const r = await $`rsync -a --ignore-existing -e ${"ssh -o BatchMode=yes"} ${HOST + ":.claude/projects/" + t.enc + "/"} ${t.pd + "/"}`.quiet();
@@ -625,22 +649,35 @@ async function recall(slugs: string[]) {
     out(`  pull      ${pl[pl.length - 1] ?? ""}`);
     if (pull.exitCode !== 0) {
       out("  !! fast-forward pull failed — resolve here before closing the far space.");
+      failed = true;
       continue;
     }
 
     const open = await $`herdr worktree open --cwd ${t.repo} --path ${t.wt} --no-focus`.quiet();
     const oj = (() => { try { return JSON.parse(open.stdout.toString()); } catch { return {}; } })();
     out(`  here      ${oj.error ? "ERROR " + oj.error.code : (oj.result?.already_open ? "already open " : "opened ") + oj.result?.workspace?.workspace_id}`);
-    if (oj.error) continue;
+    if (oj.error) {
+      failed = true;
+      continue;
+    }
 
     await claim(t, `${userInfo().username}@${hostname().split(".")[0]}`);
     await remember(t, { sentTo: undefined, at: new Date().toISOString() });
 
-    const closed = await remote(
-      `id=$(herdr workspace list | jq -r --arg p ${q(t.wt)} '.result.workspaces[] | select(.worktree.checkout_path==$p) | .workspace_id' | head -1)
-       [ -n "$id" ] && { printf '  far-close '; herdr workspace close "$id" | jq -r 'if .error then .error.code else "closed" end' ; } || echo '  far-close no space there'`,
-    );
-    out(closed);
+    // Close on the right server, not just the default one.
+    const row = (await remote(farSpaceLookup(t.wt))).trim();
+    if (!row) out("  far-close no space there");
+    else {
+      const [sock, id] = row.split("\t");
+      const res = (await remote(
+        `HERDR_SOCKET_PATH=${q(sock)} herdr workspace close ${q(id)} | jq -r 'if .error then "ERROR " + .error.code else "closed" end'`,
+      )).trim();
+      out(`  far-close ${res} ${id}`);
+      if (!res.startsWith("closed")) {
+        out(`  !! ${t.slug} is now OPEN ON BOTH — close ${id} on ${HOST}, or run send ${HOST} ${t.slug}`);
+        failed = true;
+      }
+    }
   }
 }
 
@@ -664,11 +701,17 @@ async function toggle(slugs: string[]) {
       out(`  !! open on BOTH — toggle will not guess which copy is real.`);
       out(`     send ${HOST} ${t.slug}    to keep the far one`);
       out(`     recall ${HOST} ${t.slug}  to keep this one`);
+      // Reporting a broken invariant is still a failure — a script calling toggle in a loop
+      // must not read this as "done".
+      failed = true;
       continue;
     }
     if (here) await send([slug]);
     else if (there) await recall([slug]);
-    else out(`--- ${t.slug} ---\n  !! open on neither side — nothing to toggle.`);
+    else {
+      out(`--- ${t.slug} ---\n  !! open on neither side — nothing to toggle.`);
+      failed = true;
+    }
   }
 }
 
@@ -728,8 +771,10 @@ export async function handler({ args, writer }: HandlerArgs = {}) {
     return { ok: false, error: `${cmd} needs at least one <slug> — run \`maw noah list ${host}\`` };
   }
 
-  // preflight is the one command that can veto the whole hop, so it reports ok:false.
+  // Any command can now veto: preflight on a root mismatch, and send/recall/toggle whenever
+  // the one-machine invariant ends up broken. Exit code has to be usable from a script.
   let ok = true;
+  failed = false;
   switch (cmd) {
     case "preflight": ok = await preflight(); break;
     case "list": await list(); break;
@@ -744,7 +789,7 @@ export async function handler({ args, writer }: HandlerArgs = {}) {
     default:
       return { ok: false, error: `unknown subcommand: ${cmd}\n\n${USAGE}` };
   }
-  return { ok, output: buf.length ? buf.join("\n") : undefined };
+  return { ok: ok && !failed, output: buf.length ? buf.join("\n") : undefined };
 }
 
 export default handler;
